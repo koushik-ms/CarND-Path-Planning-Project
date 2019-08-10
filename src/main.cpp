@@ -7,11 +7,28 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "helpers.h"
 #include "json.hpp"
+#include "spline.h"
 
 // for convenience
 using nlohmann::json;
 using std::string;
 using std::vector;
+
+template<typename T>
+void printVec(vector<T> v) {
+  for(T &x: v) {
+    std::cout << x << ", " ;
+  }
+  std::cout << std::endl;
+}
+
+bool isValidLane(int laneId) {
+  return (laneId >= 0) && (laneId < 3);
+}
+
+int getLane(double d) {
+  return static_cast<int>(floor(d/4));
+}
 
 int main() {
   uWS::Hub h;
@@ -27,6 +44,13 @@ int main() {
   string map_file_ = "../data/highway_map.csv";
   // The max s value before wrapping around the track back to 0
   double max_s = 6945.554;
+  constexpr double speed_limit = 21; // meters per second
+  constexpr double frame_period = 0.02; // seconds
+  constexpr double disp_frame = speed_limit * frame_period;
+  constexpr double speed_quantum{0.15};
+  double ego_vel {0.0};
+  int ego_lane{1};
+  bool too_close{false};
 
   std::ifstream in_map_(map_file_.c_str(), std::ifstream::in);
 
@@ -51,7 +75,7 @@ int main() {
   }
 
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
-               &map_waypoints_dx,&map_waypoints_dy]
+               &map_waypoints_dx,&map_waypoints_dy,&ego_vel, &ego_lane, &too_close]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -92,12 +116,128 @@ int main() {
 
           vector<double> next_x_vals;
           vector<double> next_y_vals;
-
-          /**
-           * TODO: define a path made up of (x,y) points that the car will visit
-           *   sequentially every .02 seconds
-           */
-
+          
+          auto path_size = previous_path_x.size();
+          // std::cout << "Prev: " << path_size << std::endl;
+          auto next_s = (path_size > 0) ? end_path_s : car_s;
+          // auto next_d = (path_size > 0) ? end_path_d : car_d;
+          auto next_d = car_d;
+          vector<double> way_points_x; // widely spaced way-points to determine path (x co-ordinates)
+          vector<double> way_points_y; // widely spaced way-points to determine path (y co-ordinates)
+          
+          // reference point (for determining intermediate points)
+          auto ref_x = car_x;
+          auto ref_y = car_y;
+          auto ref_yaw = deg2rad(car_yaw);
+          auto prev_car_x = car_x - cos(car_yaw);
+          auto prev_car_y = car_y - sin(car_yaw);
+          
+          too_close = false;
+          bool left_lane_available = isValidLane(ego_lane-1);
+          bool right_lane_available = isValidLane(ego_lane+1);
+          for(auto &tv: sensor_fusion) {
+            double tv_d = tv[6];
+            double tv_s = tv[5];
+            double speed = distance(0, 0, tv[3], tv[4]);
+            double proj = tv_s + speed * frame_period * path_size;
+            if( (tv_d > (4*ego_lane)) && (tv_d < (4*(ego_lane + 1)))) {
+              if( (proj > next_s) && ((proj - next_s) < 30) ) {
+                // Collision detected
+                too_close = true;
+              }
+            } else {
+              if(isValidLane(ego_lane-1) && (getLane(tv_d) == ego_lane-1) && (abs(proj-next_s) < 30) ) {
+                left_lane_available = false;
+              }
+              if(isValidLane(ego_lane+1) && (getLane(tv_d) == ego_lane+1) && (abs(proj-next_s) < 30) ) {
+                right_lane_available = false;
+              }
+            }
+          }
+          
+          if(too_close) {
+            ego_vel = std::max(speed_quantum, ego_vel-speed_quantum);
+            if(ego_vel < 0.75*speed_limit) { // avoid jerk from turns... 
+              ego_lane = left_lane_available ? ego_lane-1 : (right_lane_available ? ego_lane+1 : ego_lane);
+            }
+          } else {
+            ego_vel = std::min(speed_limit, ego_vel+speed_quantum);
+          }
+          next_d = ego_lane * 4 + 2;
+          
+          // if not many points left from previous path...
+          if(path_size < 2) {
+            // ... start with car location as reference.
+            way_points_x.push_back(prev_car_x);
+            way_points_x.push_back(car_x);
+            
+            way_points_y.push_back(prev_car_y);
+            way_points_y.push_back(car_y);
+          } else {
+            // ... else, use the end of path as reference.
+            prev_car_x = previous_path_x[path_size - 2];
+            prev_car_y = previous_path_y[path_size - 2];
+            
+            ref_x = previous_path_x[path_size-1];
+            ref_y = previous_path_y[path_size-1];
+            ref_yaw = atan2(ref_y - prev_car_y, ref_x - prev_car_x);
+            
+            way_points_x.push_back(prev_car_x);
+            way_points_x.push_back(ref_x);
+            
+            way_points_y.push_back(prev_car_y);
+            way_points_y.push_back(ref_y);
+          }
+//           std::cout << "Init\n";
+//           printVec(way_points_x);
+          // create anchor points at s=30, 60, 90 on the same lane (d doesn't change)
+          auto p1 = getXY(next_s+30, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          auto p2 = getXY(next_s+60, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          auto p3 = getXY(next_s+90, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          
+          way_points_x.push_back(p1[0]);
+          way_points_x.push_back(p2[0]);
+          way_points_x.push_back(p3[0]);
+          
+          way_points_y.push_back(p1[1]);
+          way_points_y.push_back(p2[1]);
+          way_points_y.push_back(p3[1]);
+//           std::cout << "Mid\n";
+//           printVec(way_points_x);
+          // calculate x, y for these in car local co-ordinates. 
+          for(int i = 0; i < way_points_x.size(); ++i) {
+            auto sx = way_points_x[i] - ref_x;
+            auto sy = way_points_y[i] - ref_y;
+            
+            way_points_x[i] = (sx*cos(0-ref_yaw) - sy*sin(0-ref_yaw));
+            way_points_y[i] = (sx*sin(0-ref_yaw) + sy*cos(0-ref_yaw));
+          }
+          
+          // intermediate points that make motion smooth. Use spline, time-inc and ref-vel to calculate.
+          tk::spline s;
+//           std::cout << "Fin\n";
+//           printVec(way_points_x);
+          s.set_points(way_points_x, way_points_y);
+          double target_x{30};
+          double target_y = s(target_x);
+          double target = distance(0, 0, target_x, target_y);
+          double num_steps = target/(frame_period*ego_vel);
+          double delta_x = 0.0;
+          // Populate next_points.          
+          if(path_size > 0) {
+            next_x_vals.assign(std::begin(previous_path_x), std::end(previous_path_x));
+            next_y_vals.assign(std::begin(previous_path_y), std::end(previous_path_y));
+          }
+          // transform from car co-ordinates to world co-ordinates and add to next_x...
+          for(int i = path_size; i<50; ++i) {
+            delta_x += target_x/num_steps;
+            auto newy = s(delta_x);
+            // rotate and shift co-ordinates.
+            double x_point = delta_x*cos(ref_yaw) - newy*sin(ref_yaw) + ref_x;
+            double y_point = delta_x*sin(ref_yaw) + newy*cos(ref_yaw) + ref_y;
+            next_x_vals.push_back(x_point);
+            next_y_vals.push_back(y_point);
+          }
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
