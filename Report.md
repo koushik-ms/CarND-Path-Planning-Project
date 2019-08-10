@@ -9,7 +9,8 @@ The goals of this project are as follows:
 
 [//]: # (Image References)
 
-[run1]: ./data/run1.png "Screenshot of run"
+[run1]: ./data/run1.png "Screenshot of run 1"
+[run2]: ./data/run2.png "Screenshot of run 2"
 
 ![alt text][run1]
 
@@ -25,7 +26,10 @@ The goals of this project are as follows:
 7. The car is able to change lanes  ✓
 8. There is a reflection on how to generate paths.  ✓
 
-Points 2 - 5 were verified in the simulator. Above is a screenshot of the algorithm running on the Udacity simulator for this project.
+Points 2 - 5 were verified in the simulator. Below is a screenshot of the algorithm running on the Udacity simulator for this project.
+
+![alt text][run2]
+
 
 ## Model Documentation
 
