@@ -9,11 +9,9 @@ The goals of this project are as follows:
 
 [//]: # (Image References)
 
-[bar1]: ./examples/bar1.png "Training data Visualization"
-[bar2]: ./examples/bar2.png "Combined Training data Visualization"
-[image1]: ./examples/image1.png "Training sample"
-[image11]: ./examples/image11.png "Training data for all classes"
-[image2]: ./examples/image2.png "Grayscaling"
+[run1]: ./data/run1.png "Screenshot of run"
+
+![alt text][run1]
 
 ## Rubric points
 
@@ -27,7 +25,7 @@ The goals of this project are as follows:
 7. The car is able to change lanes  ✓
 8. There is a reflection on how to generate paths.  ✓
 
-Points 2 - 5 were verified in the simulator. Below is a screenshot of the algorithm running on the Udacity simulator for this project.
+Points 2 - 5 were verified in the simulator. Above is a screenshot of the algorithm running on the Udacity simulator for this project.
 
 ## Model Documentation
 
