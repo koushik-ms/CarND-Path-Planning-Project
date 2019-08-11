@@ -4,8 +4,8 @@
 
 The goals of this project are as follows:
 
-1. build a path planning algorithm that can safely drive the car in the simulator around in the tracks.
-2. Use map and sensor fusion data to build trajectory to make the car stay on the track as well as avoid collisions
+1. Build a path planning algorithm that builds a trajectory for safely driving the car around the track.
+2. Use map and sensor fusion data to build trajectory to make the car stay on the track as well as avoid collisions.
 
 [//]: # (Image References)
 
@@ -30,6 +30,7 @@ Points 2 - 5 were verified in the simulator. Below is a screenshot of the algori
 
 ![alt text][run2]
 
+The workspace has a recording of the algorithm running saved in CarND-Path-Planning-Project/data/run2.mp4.
 
 ## Model Documentation
 
