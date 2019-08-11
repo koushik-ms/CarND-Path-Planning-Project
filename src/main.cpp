@@ -74,7 +74,7 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
+  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s, speed_limit, frame_period, disp_frame, speed_quantum,
                &map_waypoints_dx,&map_waypoints_dy,&ego_vel, &ego_lane, &too_close]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                uWS::OpCode opCode) {
@@ -118,10 +118,8 @@ int main() {
           vector<double> next_y_vals;
           
           auto path_size = previous_path_x.size();
-          // std::cout << "Prev: " << path_size << std::endl;
-          auto next_s = (path_size > 0) ? end_path_s : car_s;
-          // auto next_d = (path_size > 0) ? end_path_d : car_d;
-          auto next_d = car_d;
+          auto next_s = (path_size > 0) ? end_path_s : car_s; // starting s value for the trajectory planner
+          auto next_d = car_d; // // starting d value for the trajectory planner
           vector<double> way_points_x; // widely spaced way-points to determine path (x co-ordinates)
           vector<double> way_points_y; // widely spaced way-points to determine path (y co-ordinates)
           
@@ -131,25 +129,30 @@ int main() {
           auto ref_yaw = deg2rad(car_yaw);
           auto prev_car_x = car_x - cos(car_yaw);
           auto prev_car_y = car_y - sin(car_yaw);
-          
+
+          // triggers for lane change and collision avoidance
           too_close = false;
           bool left_lane_available = isValidLane(ego_lane-1);
           bool right_lane_available = isValidLane(ego_lane+1);
           for(auto &tv: sensor_fusion) {
             double tv_d = tv[6];
             double tv_s = tv[5];
-            double speed = distance(0, 0, tv[3], tv[4]);
-            double proj = tv_s + speed * frame_period * path_size;
+            double speed = distance(0, 0, tv[3], tv[4]); 
+            // project target vehicle location
+            double proj = tv_s + speed * frame_period * path_size; 
             if( (tv_d > (4*ego_lane)) && (tv_d < (4*(ego_lane + 1)))) {
+              // Target vehicle is in the same lane as ego vehicle
               if( (proj > next_s) && ((proj - next_s) < 30) ) {
                 // Collision detected
                 too_close = true;
               }
             } else {
               if(isValidLane(ego_lane-1) && (getLane(tv_d) == ego_lane-1) && (abs(proj-next_s) < 30) ) {
+                // target vehicle blocks left lane. maybe checking forward direction alone is sufficient ?
                 left_lane_available = false;
               }
               if(isValidLane(ego_lane+1) && (getLane(tv_d) == ego_lane+1) && (abs(proj-next_s) < 30) ) {
+                // target vehicle blocks right lane. maybe checking forward direction alone is sufficient ?
                 right_lane_available = false;
               }
             }
@@ -188,9 +191,8 @@ int main() {
             way_points_y.push_back(prev_car_y);
             way_points_y.push_back(ref_y);
           }
-//           std::cout << "Init\n";
-//           printVec(way_points_x);
-          // create anchor points at s=30, 60, 90 on the same lane (d doesn't change)
+          
+          // create anchor points at s=30, 60, 90 on the desired lane
           auto p1 = getXY(next_s+30, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
           auto p2 = getXY(next_s+60, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
           auto p3 = getXY(next_s+90, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
@@ -202,9 +204,7 @@ int main() {
           way_points_y.push_back(p1[1]);
           way_points_y.push_back(p2[1]);
           way_points_y.push_back(p3[1]);
-//           std::cout << "Mid\n";
-//           printVec(way_points_x);
-          // calculate x, y for these in car local co-ordinates. 
+          // calculate x, y for these anchor points in car-local co-ordinates. 
           for(int i = 0; i < way_points_x.size(); ++i) {
             auto sx = way_points_x[i] - ref_x;
             auto sy = way_points_y[i] - ref_y;
@@ -213,11 +213,12 @@ int main() {
             way_points_y[i] = (sx*sin(0-ref_yaw) + sy*cos(0-ref_yaw));
           }
           
-          // intermediate points that make motion smooth. Use spline, time-inc and ref-vel to calculate.
+          // use intermediate points to make motion smooth. Use spline to calculate trajectory.
           tk::spline s;
-//           std::cout << "Fin\n";
-//           printVec(way_points_x);
           s.set_points(way_points_x, way_points_y);
+          
+          // we use a triangle approximation of the spline to calculate the step-size in the 
+          // x-direction for each point in the trajectory.
           double target_x{30};
           double target_y = s(target_x);
           double target = distance(0, 0, target_x, target_y);
@@ -225,11 +226,13 @@ int main() {
           double delta_x = 0.0;
           // Populate next_points.          
           if(path_size > 0) {
+            // ... beginning with points left over from previous plan
             next_x_vals.assign(std::begin(previous_path_x), std::end(previous_path_x));
             next_y_vals.assign(std::begin(previous_path_y), std::end(previous_path_y));
           }
           // transform from car co-ordinates to world co-ordinates and add to next_x...
           for(int i = path_size; i<50; ++i) {
+            // upto a maximum of 50 points.
             delta_x += target_x/num_steps;
             auto newy = s(delta_x);
             // rotate and shift co-ordinates.
