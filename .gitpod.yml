@@ -2,5 +2,5 @@ image: gitpod/workspace-full-vnc
 
 tasks:
   - init: ./install-ubuntu.sh
-    command: echo 'insert command here'
+    command: ./start.sh
     
